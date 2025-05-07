@@ -145,32 +145,58 @@ def get_chat_engine(_index: VectorStoreIndex): # _index is the key for caching
 #   emails:
 #   - melsby@example.com
 
+import streamlit as st
+import logging
+import yaml
+import streamlit_authenticator as stauth
+from yaml import SafeLoader
+
+# Try accessing the secrets from `secrets.toml`
+import streamlit as st
+import logging
+import streamlit_authenticator as stauth
+
+# Try accessing the secrets from `secrets.toml`
 try:
-    with open('config.yaml') as file:
-        config = yaml.load(file, Loader=SafeLoader)
-    
-    if 'credentials' not in config or 'cookie' not in config:
-        st.error("Error: `config.yaml` is missing 'credentials' or 'cookie' section.")
+    # Check if 'credentials' and 'cookie' sections are available in secrets
+    if 'credentials' not in st.secrets or 'cookie' not in st.secrets:
+        st.error("Error: 'secrets.toml' is missing 'credentials' or 'cookie' section.")
         st.stop()
 
-    # You can hash passwords once using:
-    # import streamlit_authenticator as stauth
-    # hashed_passwords = stauth.Hasher(['password123', 'anotherpassword']).generate()
-    # print(hashed_passwords) # Then copy these into your config.yaml
-    # Do not run Hasher.hash_passwords(config['credentials']) in the app directly.
+    # Extract user data and cookie data from secrets.toml
+    credentials = st.secrets['credentials']
+    cookie = st.secrets['cookie']
 
+    # The `credentials` section in secrets.toml should already have usernames as keys
+    # and user details as nested dictionaries (e.g., 'professor' => {'email': '...', 'first_name': '...', 'password': '...'}).
+    # We need to convert this into the format expected by `stauth.Authenticate`.
+
+    usernames = list(credentials.keys())  # List of usernames (e.g., ['professor'])
+    passwords = [user['password'] for user in credentials.values()]  # List of passwords (hashed or plain)
+    full_names = [f"{user['first_name']} {user['last_name']}" for user in credentials.values()]  # Full names of users
+    emails = [user['email'] for user in credentials.values()]  # Emails of users
+
+    # Construct the credentials dictionary with required fields in the correct format
+    credentials_dict = {
+        'usernames': {username: {  # Each username is a key with associated user data as a dictionary
+            'email': user['email'],
+            'first_name': user['first_name'],
+            'last_name': user['last_name'],
+            'password': user['password'],
+            'failed_login_attempts': user.get('failed_login_attempts', 0),
+            'logged_in': user.get('logged_in', False)
+        } for username, user in credentials.items()},
+    }
+
+    # Initialize the authenticator with the credentials and cookie data
     authenticator = stauth.Authenticate(
-        config['credentials'],
-        config['cookie']['name'],
-        config['cookie']['key'],
-        config['cookie']['expiry_days']
-        # preauthorized=config.get('preauthorized') # Optional
+        credentials_dict,  # Pass the entire credentials dictionary
+        cookie['name'],  # Cookie name
+        cookie['key'],   # Cookie key
+        cookie['expiry_days']  # Expiry days for the cookie
     )
-except FileNotFoundError:
-    st.error("Authentication Error: `config.yaml` not found. Please create it.")
-    st.stop()
-except yaml.YAMLError as e:
-    st.error(f"Authentication Error: Could not parse `config.yaml`: {e}")
+except KeyError as e:
+    st.error(f"Authentication Error: Missing key in 'secrets.toml': {e}")
     st.stop()
 except Exception as e:
     st.error(f"Authentication Error: Failed to initialize authenticator: {e}")
